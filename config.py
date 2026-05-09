@@ -202,3 +202,29 @@ REALME_CONFIG = {
     "domestic": {"server": "rms11.realme.net", "bucket": "domestic"},
     "export": {"server": "rms01.realme.net", "bucket": "export"},
 }
+
+# --- Earbuds Configuration ---
+EARBUDS_CONFIG = {
+    "endpoints": {
+        "firmware_info": "/v1/earphone/firmwareInfo",
+        "whitelist": "/v1/earphone/new/latestWhiteList"
+    },
+    "regions": {
+        "cn": {
+            "host": "iot-earbuds-cn.allawntech.com",
+            "key": "&*%earphone-OP7u3423**%$"
+        },
+        "eu": {
+            "host": "iot-earbuds-eu.allawnos.com",
+            "key": "&*%earphone-OP6r888s**%$"
+        },
+        "gl": {
+            "host": "iot-earbuds-sg.allawnos.com",
+            "key": "&*%earphone-OP9U3544**%$"
+        },
+        "us": {
+            "host": "iot-earbuds-us.allawnos.com",
+            "key": "&*%earbuds-OP6rus-easts*%$"
+        }
+    }
+}
