@@ -12,6 +12,7 @@ import re
 import string
 import sys
 import time
+import hashlib
 from typing import Dict, Tuple
 
 import requests
@@ -28,37 +29,33 @@ SPECIAL_SERVER_CN = IOT_CONFIG["special_server_cn"]
 def get_key(key_pseudo: str) -> bytes:
     return (OLD_KEYS[int(key_pseudo[0])] + key_pseudo[4:12]).encode("utf-8")
 
-
-def encrypt_ecb(data: str) -> str:
+def encrypt_ctr(data: str) -> str:
+    chars = string.ascii_letters + string.digits + "_!#$%&()+-="
     key_pseudo = str(random.randint(0, 9)) + "".join(
-        random.choices(string.ascii_letters + string.digits, k=14)
+        random.choices(chars, k=14)
     )
     key_real = get_key(key_pseudo)
+    iv = hashlib.md5(key_real).digest()
 
-    cipher = Cipher(algorithms.AES(key_real), modes.ECB(), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key_real), modes.CTR(iv), backend=default_backend())
     encryptor = cipher.encryptor()
 
-    block_size = 16
-    padding_length = block_size - (len(data) % block_size)
-    padded_data = data.encode("utf-8") + bytes([padding_length] * padding_length)
-
-    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    ciphertext = encryptor.update(data.encode("utf-8")) + encryptor.finalize()
     return base64.b64encode(ciphertext).decode("utf-8") + key_pseudo
 
-
-def decrypt_ecb(encrypted_data: str) -> str:
+def decrypt_ctr(encrypted_data: str) -> str:
     ciphertext_b64 = encrypted_data[:-15]
     key_pseudo = encrypted_data[-15:]
 
     ciphertext = base64.b64decode(ciphertext_b64)
     key_real = get_key(key_pseudo)
+    iv = hashlib.md5(key_real).digest()
 
-    cipher = Cipher(algorithms.AES(key_real), modes.ECB(), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key_real), modes.CTR(iv), backend=default_backend())
     decryptor = cipher.decryptor()
 
-    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-    padding_length = padded_plaintext[-1]
-    return padded_plaintext[:-padding_length].decode("utf-8")
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return plaintext.decode("utf-8")
 
 
 def replace_gauss_url(url: str) -> str:
@@ -74,6 +71,7 @@ def build_special_request_data(ota_version: str, model: str) -> Tuple[Dict, Dict
     ota_prefix = "_".join(rom_parts[:2]) if len(rom_parts) >= 2 else ota_version
 
     headers = {
+        "version": "3",
         "language": lang,
         "newLanguage": lang,
         "romVersion": rom_version,
@@ -104,18 +102,26 @@ def build_special_request_data(ota_version: str, model: str) -> Tuple[Dict, Dict
         "isRealme": "1" if "RMX" in model else "0",
         "time": str(int(time.time() * 1000)),
     }
+    
+    body["modules"] = [
+        {
+            "otaPkgType": "1",
+            "version": ota_version
+        }
+    ]
+    
     return headers, body
 
 
 def query_iot_server(ota_version: str, model: str):
     headers, body = build_special_request_data(ota_version, model)
-    encrypted_body = encrypt_ecb(json.dumps(body))
+    encrypted_body = encrypt_ctr(json.dumps(body))
 
     try:
         response = requests.post(
             SPECIAL_SERVER_CN,
             headers=headers,
-            json={"params": encrypted_body},
+            json={"version": "4", "params": encrypted_body},
             timeout=30,
         )
 
@@ -130,8 +136,10 @@ def query_iot_server(ota_version: str, model: str):
         if not encrypted_resp:
             return None
 
-        decrypted_json = json.loads(decrypt_ecb(encrypted_resp))
-        if decrypted_json.get("checkFailReason"):
+        decrypted_json = json.loads(decrypt_ctr(encrypted_resp))
+        
+        module_data = decrypted_json.get("modules", [{}])[0]
+        if module_data.get("checkFailReason") or decrypted_json.get("checkFailReason"):
             return None
 
         return decrypted_json
@@ -140,15 +148,18 @@ def query_iot_server(ota_version: str, model: str):
 
 
 def build_iot_result(decrypted_json):
-    down_url = replace_gauss_url(decrypted_json.get("down_url", "N/A"))
-    changelog = replace_gauss_url(str(decrypted_json.get("description", "N/A")))
-    patch_level = str(decrypted_json.get("googlePatchLevel", "N/A")).replace("0", "N/A")
+    module_data = decrypted_json.get("modules", [{}])[0]
+    data = {**decrypted_json, **module_data}
+    
+    down_url = replace_gauss_url(data.get("down_url", "N/A"))
+    changelog = replace_gauss_url(str(data.get("description", "N/A")))
+    patch_level = str(data.get("googlePatchLevel", "N/A")).replace("0", "N/A")
     return {
         "link": down_url,
         "changelog": changelog,
         "security_patch": patch_level,
-        "version": decrypted_json.get("new_version", "N/A"),
-        "ota_version": decrypted_json.get("new_version", "N/A"),
+        "version": data.get("new_version", "N/A"),
+        "ota_version": data.get("version_name", data.get("new_version", "N/A")),
     }
 
 
@@ -226,3 +237,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
