@@ -22,8 +22,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from config import IOT_CONFIG
 
 OLD_KEYS = IOT_CONFIG["old_keys"]
-
-SPECIAL_SERVER_CN = IOT_CONFIG["special_server_cn"]
+SPECIAL_SERVERS = IOT_CONFIG["special_servers"]
 
 
 def get_key(key_pseudo: str) -> bytes:
@@ -64,12 +63,12 @@ def replace_gauss_url(url: str) -> str:
     return url.replace(IOT_CONFIG["gauss_auto_url"], IOT_CONFIG["gauss_manual_url"])
 
 
-def build_special_request_data(ota_version: str, model: str) -> Tuple[Dict, Dict]:
-    lang = "zh-CN"
+def build_special_request_data(ota_version: str, model: str, region: str) -> Tuple[Dict, Dict]:
+    lang = "zh-CN" if region.lower() == "cn" else "en-EN"
+    
     rom_parts = ota_version.split("_")
     rom_version = "_".join(rom_parts[:3]) if len(rom_parts) >= 3 else ota_version
-    ota_prefix = "_".join(rom_parts[:2]) if len(rom_parts) >= 2 else ota_version
-
+    
     headers = {
         "version": "3",
         "language": lang,
@@ -113,13 +112,15 @@ def build_special_request_data(ota_version: str, model: str) -> Tuple[Dict, Dict
     return headers, body
 
 
-def query_iot_server(ota_version: str, model: str):
-    headers, body = build_special_request_data(ota_version, model)
+def query_iot_server(ota_version: str, model: str, region: str):
+    headers, body = build_special_request_data(ota_version, model, region)
     encrypted_body = encrypt_ctr(json.dumps(body))
+    
+    server_url = SPECIAL_SERVERS.get(region.lower(), SPECIAL_SERVERS["cn"])
 
     try:
         response = requests.post(
-            SPECIAL_SERVER_CN,
+            server_url,
             headers=headers,
             json={"version": "4", "params": encrypted_body},
             timeout=30,
@@ -163,7 +164,7 @@ def build_iot_result(decrypted_json):
     }
 
 
-def query_iot(ota_prefix: str, model_override: str = None):
+def query_iot(ota_prefix: str, region: str, model_override: str = None):
     ota_input = ota_prefix.upper()
 
     is_simple = not bool(
@@ -178,7 +179,9 @@ def query_iot(ota_prefix: str, model_override: str = None):
         for suffix in suffixes:
             current_prefix = ota_input + suffix
             full_version = f"{current_prefix}.01_0001_197001010000"
-            result = query_iot_server(full_version, model)
+            
+            result = query_iot_server(full_version, model, region)
+            
             if result:
                 results.append(
                     {
@@ -198,7 +201,9 @@ def query_iot(ota_prefix: str, model_override: str = None):
         full_version = (
             f"{ota_input}.01_0001_197001010000" if len(parts) < 3 else ota_input
         )
-        result = query_iot_server(full_version, model)
+        
+        result = query_iot_server(full_version, model, region)
+        
         if result:
             results.append(
                 {"query": ota_input, "found": True, "result": build_iot_result(result)}
@@ -212,12 +217,14 @@ def main():
     parser = argparse.ArgumentParser(description="IoT Special OTA Query Tool")
     parser.add_argument("ota_prefix", help="OTA version prefix or model name")
     parser.add_argument(
-        "region", choices=["cn"], help="Region (IoT server only supports cn)"
+        "region", choices=["cn", "gl", "in", "eu"], help="Region to query (cn, gl, in, eu)"
     )
     parser.add_argument("--model", help="Custom model override")
 
     args = parser.parse_args()
-    results = query_iot(args.ota_prefix, args.model)
+    
+    results = query_iot(args.ota_prefix, args.region, args.model)
+    
     has_result = False
     for item in results:
         print(f"Querying for {item['query']}\n")
@@ -237,4 +244,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
