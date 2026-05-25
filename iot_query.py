@@ -69,6 +69,9 @@ def build_special_request_data(ota_version: str, model: str, region: str) -> Tup
     rom_parts = ota_version.split("_")
     rom_version = "_".join(rom_parts[:3]) if len(rom_parts) >= 3 else ota_version
     
+    random_imei = "".join(random.choices(string.digits, k=15))
+    random_device_id = hashlib.sha256(f"{random_imei}_{time.time()}".encode()).hexdigest()
+
     headers = {
         "version": "3",
         "language": lang,
@@ -80,9 +83,8 @@ def build_special_request_data(ota_version: str, model: str, region: str) -> Tup
         "model": model,
         "infVersion": "1",
         "nvCarrier": "10010111",
-        "deviceId": "0" * 64,
+        "deviceId": random_device_id,
         "mode": "client_auto",
-        "version": "1",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
@@ -93,9 +95,9 @@ def build_special_request_data(ota_version: str, model: str, region: str) -> Tup
         "otaVersion": ota_version,
         "model": model,
         "productName": model,
-        "imei": "0" * 15,
+        "imei": random_imei,
         "mode": "0",
-        "deviceId": "0" * 64,
+        "deviceId": random_device_id,
         "version": "2",
         "type": "1",
         "isRealme": "1" if "RMX" in model else "0",
